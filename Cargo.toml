@@ -1,0 +1,17 @@
+[package]
+name = "questdb-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-postgres = "0.7"
+postgres-native-tls = "0.5"
+native-tls = "0.2"
+clap = { version = "4.1", features = ["derive"] }
+rustyline = "9.0"
+url = "2.2"
+anyhow = "1.0"
+
+
+
