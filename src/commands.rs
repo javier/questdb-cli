@@ -1,37 +1,20 @@
 // src/commands.rs
-use crate::completer::SQLCompleter;
+use crate::output::execute_query;
+use anyhow::{anyhow, Result};
+use reqwest::Client as HttpClient;
+use sqlparser::dialect::GenericDialect;
+use sqlparser::parser::Parser;
 use tokio_postgres::Client;
 
-pub async fn execute_query(client: &Client, query: &str) {
-    match client.simple_query(query).await {
-        Ok(result) => {
-            for message in result {
-                match message {
-                    tokio_postgres::SimpleQueryMessage::Row(row) => {
-                        let columns = row.columns();
-                        for (i, col) in columns.iter().enumerate() {
-                            print!("{}: {}", col.name(), row.get(i).unwrap_or("NULL"));
-                            if i < columns.len() - 1 {
-                                print!(", ");
-                            }
-                        }
-                        println!();
-                    }
-                    tokio_postgres::SimpleQueryMessage::CommandComplete(count) => {
-                        println!("Command completed: {}", count);
-                    }
-                    _ => {}
-                }
-            }
-        }
-        Err(e) => eprintln!("Query failed: {}", e),
-    }
+pub async fn execute_query_command(client: &Client, query: &str, format: &str) -> Result<()> {
+    execute_query(client, query, format).await
 }
 
 pub async fn handle_meta_command(
     client: &Client,
     command: &str,
-    completer: &mut SQLCompleter,
+    completer: &mut crate::completer::SQLCompleter,
+    format: &mut String,
 ) {
     match command {
         "\\help" => {
@@ -42,12 +25,17 @@ pub async fn handle_meta_command(
             println!("  \\dwal              List all WAL tables");
             println!("  \\dstorage <table>  Show storage details for a table");
             println!("  \\refresh           Refresh metadata");
+            println!("  \\format [format]   Set output format (table, csv, json, vertical)");
         }
         "\\dt" => {
-            execute_query(client, "SELECT * FROM tables()").await;
+            if let Err(e) = execute_query_command(client, "SELECT * FROM tables()", format).await {
+                eprintln!("Error executing \\dt: {}", e);
+            }
         }
         "\\dwal" => {
-            execute_query(client, "SELECT * FROM wal_tables()").await;
+            if let Err(e) = execute_query_command(client, "SELECT * FROM wal_tables()", format).await {
+                eprintln!("Error executing \\dwal: {}", e);
+            }
         }
         cmd if cmd.starts_with("\\dstorage") => {
             let table = cmd.trim_start_matches("\\dstorage").trim();
@@ -55,11 +43,12 @@ pub async fn handle_meta_command(
                 eprintln!("Usage: \\dstorage <table>");
             } else {
                 let query = format!("SELECT * FROM table_storage('{}')", table);
-                execute_query(client, &query).await;
+                if let Err(e) = execute_query_command(client, &query, format).await {
+                    eprintln!("Error executing \\dstorage: {}", e);
+                }
             }
         }
         "\\refresh" => {
-            // Refresh metadata
             println!("Refreshing metadata...");
             if let Err(e) = completer.update_tables(client).await {
                 eprintln!("Failed to refresh metadata: {}", e);
@@ -67,7 +56,39 @@ pub async fn handle_meta_command(
                 println!("Metadata refreshed.");
             }
         }
+        cmd if cmd.starts_with("\\format") => {
+            let args = cmd.trim_start_matches("\\format").trim();
+            if args.is_empty() {
+                println!("Current format: {}", format);
+                println!("Available formats: table, csv, json, vertical");
+            } else {
+                *format = args.to_string();
+                println!("Output format set to '{}'", format);
+            }
+        }
         _ => println!("Unknown meta command: {}", command),
     }
 }
 
+pub async fn execute_script(client: &Client, source: &str, format: &str) -> Result<()> {
+    let content = if source.starts_with("http://") || source.starts_with("https://") {
+        let response = HttpClient::new().get(source).send().await?;
+        response.text().await?
+    } else {
+        std::fs::read_to_string(source)?
+    };
+
+    let dialect = GenericDialect {};
+    let statements = Parser::parse_sql(&dialect, &content)
+        .map_err(|e| anyhow!("Failed to parse SQL: {}", e))?;
+
+    for statement in statements {
+        let query = statement.to_string();
+        println!("Executing: {}", query);
+        if let Err(e) = execute_query_command(client, &query, format).await {
+            eprintln!("Error executing query in script: {}", e);
+        }
+    }
+
+    Ok(())
+}

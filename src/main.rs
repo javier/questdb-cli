@@ -1,15 +1,18 @@
 // src/main.rs
+
 mod cli;
 mod commands;
 mod completer;
 mod db;
+mod output;
 mod repl;
 
 use anyhow::Result;
-use clap::Parser; // Import the Parser trait
+use clap::Parser;
 use cli::{Cli, Commands};
 use db::connect_to_db;
 use repl::start_repl;
+use commands::{execute_script, execute_query_command};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -35,11 +38,23 @@ async fn main() -> Result<()> {
     .await
     {
         Ok(client) => {
-            println!("Connected to QuestDB at {}:{}.", host, port);
-            if let Some(Commands::Query { sql }) = cli.command {
-                commands::execute_query(&client, &sql).await;
-            } else {
-                start_repl(client).await;
+            match cli.command {
+                Some(Commands::Exec { sql }) => {
+                    if let Err(e) = execute_query_command(&client, &sql, &cli.format).await {
+                        eprintln!("Error executing query: {}", e);
+                    }
+                }
+                Some(Commands::ExecFrom { source }) => {
+                    if let Err(e) = execute_script(&client, &source, &cli.format).await {
+                        eprintln!("Error executing script: {}", e);
+                    }
+                }
+                _ => {
+                    println!("Connected to QuestDB at {}:{}.", host, port);
+                    if let Err(e) = start_repl(client, &cli.format, &cli.history_file).await {
+                        eprintln!("Error in REPL: {}", e);
+                    }
+                }
             }
         }
         Err(e) => {
@@ -49,4 +64,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-
