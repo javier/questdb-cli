@@ -10,6 +10,8 @@ use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex as TokioMutex;
 use anyhow::Result;
 use shellexpand::tilde;
+use std::io::Write;
+
 
 pub async fn start_repl(client: Client, default_format: &str, history_file: &str) -> Result<()> {
     let mut completer = SQLCompleter::new();
@@ -98,8 +100,13 @@ pub async fn start_repl(client: Client, default_format: &str, history_file: &str
                                         if let Err(e) = execute_query_command(&client_clone, &query, &format_str).await {
                                             eprintln!("Query execution error: {}", e);
                                         }
+
+                                        // Ensure the prompt appears immediately after the query execution
+                                        print!("questdb> ");
+                                        std::io::stdout().flush().unwrap();
                                     });
                                 }
+
                             },
                             Err(ReadlineError::Interrupted) => {
                                 println!("Use \\q to quit.");
