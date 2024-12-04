@@ -1,13 +1,31 @@
-// src/commands.rs
-use crate::output::execute_query;
+use crate::output::print_query_results;
 use anyhow::{anyhow, Result};
-use reqwest::Client as HttpClient;
-use sqlparser::dialect::GenericDialect;
-use sqlparser::parser::Parser;
-use tokio_postgres::Client;
+use futures::StreamExt;
+use tokio_postgres::{Client, types::ToSql};
 
-pub async fn execute_query_command(client: &Client, query: &str, format: &str) -> Result<()> {
-    execute_query(client, query, format).await
+pub async fn execute_query_command(
+    client: &Client,
+    query: &str,
+    format: &str,
+) -> Result<()> {
+    let params: &[&(dyn ToSql + Sync)] = &[];
+
+    let stream = client.query_raw(query, params.iter().map(|p| *p)).await?;
+    futures::pin_mut!(stream);
+
+    while let Some(row_result) = stream.next().await {
+        match row_result {
+            Ok(row) => {
+                print_query_results(vec![row], format).await?;
+            }
+            Err(e) => {
+                eprintln!("Error processing row: {}", e);
+                break;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub async fn handle_meta_command(
@@ -72,14 +90,14 @@ pub async fn handle_meta_command(
 
 pub async fn execute_script(client: &Client, source: &str, format: &str) -> Result<()> {
     let content = if source.starts_with("http://") || source.starts_with("https://") {
-        let response = HttpClient::new().get(source).send().await?;
+        let response = reqwest::Client::new().get(source).send().await?;
         response.text().await?
     } else {
         std::fs::read_to_string(source)?
     };
 
-    let dialect = GenericDialect {};
-    let statements = Parser::parse_sql(&dialect, &content)
+    let dialect = sqlparser::dialect::GenericDialect {};
+    let statements = sqlparser::parser::Parser::parse_sql(&dialect, &content)
         .map_err(|e| anyhow!("Failed to parse SQL: {}", e))?;
 
     for statement in statements {

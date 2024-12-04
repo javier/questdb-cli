@@ -12,7 +12,6 @@ use anyhow::Result;
 use shellexpand::tilde;
 use std::io::Write;
 
-
 pub async fn start_repl(client: Client, default_format: &str, history_file: &str) -> Result<()> {
     let mut completer = SQLCompleter::new();
 
@@ -89,24 +88,27 @@ pub async fn start_repl(client: Client, default_format: &str, history_file: &str
                                     let client_clone = Arc::clone(&client);
                                     let format_clone = Arc::clone(&format);
 
-                                    // Clone the format string to pass to the task
-                                    let format_str = {
-                                        let format_guard = format_clone.lock().await;
-                                        format_guard.clone()
-                                    };
-
-                                    // Spawn a new task to execute the query
-                                    tokio::spawn(async move {
-                                        if let Err(e) = execute_query_command(&client_clone, &query, &format_str).await {
-                                            eprintln!("Query execution error: {}", e);
-                                        }
-
-                                        // Ensure the prompt appears immediately after the query execution
-                                        print!("questdb> ");
-                                        std::io::stdout().flush().unwrap();
+                                    let query_task = tokio::spawn(async move {
+                                        execute_query_command(&client_clone, &query, &format_clone.lock().await).await
                                     });
-                                }
 
+                                    tokio::select! {
+                                        result = query_task => {
+                                            if let Err(e) = result {
+                                                eprintln!("Query execution error: {:?}", e);
+                                            }
+                                        },
+                                        _ = signal::ctrl_c() => {
+                                            eprintln!("\nQuery canceled.");
+                                            let cancel_token = client.cancel_token();
+                                            let _ = cancel_token.cancel_query(NoTls).await;
+                                        }
+                                    }
+
+                                    // Ensure the prompt reappears
+                                    print!("questdb> ");
+                                    std::io::stdout().flush().unwrap();
+                                }
                             },
                             Err(ReadlineError::Interrupted) => {
                                 println!("Use \\q to quit.");

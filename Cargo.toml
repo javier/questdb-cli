@@ -5,7 +5,8 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-tokio-postgres = { version ="0.7.12", features = ["with-chrono-0_4"]}
+futures = "0.3"
+tokio-postgres = { version = "0.7.12", features = ["with-chrono-0_4"] }
 chrono = "0.4"
 clap = { version = "4.1", features = ["derive"] }
 rustyline = "9.0"
@@ -17,3 +18,5 @@ csv = "1.1"
 shellexpand = "2.1"
 reqwest = { version = "0.12.9", features = ["json", "rustls-tls"] }
 sqlparser = "0.52.0"
+futures-util = "0.3"
+

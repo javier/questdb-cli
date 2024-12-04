@@ -34,11 +34,6 @@ impl OutputFormat {
     }
 }
 
-pub async fn execute_query(client: &tokio_postgres::Client, query: &str, format: &str) -> Result<()> {
-    let rows = client.query(query, &[]).await?;
-    print_query_results(rows, format).await
-}
-
 pub async fn print_query_results(rows: Vec<Row>, format: &str) -> Result<()> {
     let output_format = OutputFormat::from_str(format);
 
